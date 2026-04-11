@@ -1,0 +1,90 @@
+# ==============================
+# System / OS
+# ==============================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==============================
+# IDE / Editor
+# ==============================
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.factorypath
+.springBeans
+.sts4-cache
+.apt_generated
+
+# ==============================
+# Java / Gradle / Build
+# ==============================
+.gradle/
+build/
+target/
+out/
+*.class
+*.jar
+*.war
+*.ear
+*.args
+
+# ==============================
+# Frontend (Next.js)
+# ==============================
+front/node_modules/
+front/.next/
+front/out/
+front/dist/
+front/.turbo/
+front/.env.local
+
+# ==============================
+# Logs / Runtime files
+# ==============================
+*.log
+target/logs/
+bootrun*.log
+front/*.log
+
+# ==============================
+# Local data / secrets
+# ==============================
+.env
+.env.*
+config.yaml
+cookie.json
+chromedriver
+db/
+*.db
+*.sqlite
+*.sqlite3
+
+# ==============================
+# Playwright local artifacts
+# ==============================
+.playwright/
+ms-playwright/
+playwright-*/
+
+# ==============================
+# Local backup / temporary folders
+# ==============================
+backup_corrupted_*/
+_upstream_get_jobs/
+npe_get_jobs-*/
+.git-rewrite
+merge_prs.log
+data.json
+src/main/java/boss/data.json
+nul
+
+# ==============================
+# Keep wrapper binaries (if present)
+# ==============================
+!.mvn/wrapper/maven-wrapper.jar
