@@ -1,0 +1,26 @@
+# ============================================================
+# Boss直聘 页面选择器外部覆盖配置（示例文件）
+# ============================================================
+# 用法：
+#   1. 复制本文件为 selectors.yml（放在项目根目录，与 build.gradle.kts 同级）
+#   2. 只写需要覆盖的选择器键，未写的键继续使用代码内置默认值
+#   3. 平台改版导致元素定位失败时，更新对应键的值即可，无需改代码重新编译
+#   4. selectors.yml 已加入 .gitignore，属于本地文件，不会被提交
+#
+# 键名与 Boss.java 中 selectors.get("boss", "<键名>", <默认值>) 一一对应。
+# 当前支持覆盖的键（默认值见括号内）：
+#
+#   JOB_LIST_CONTAINER  (//ul[contains(@class, 'rec-job-list')])
+#   JOB_CARDS           (//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')])
+#   JOB_NAME_IN_CARD    (a.job-name, span.job-name)
+#   DETAIL_HEADER       (div.job-detail-header)
+#   BOSS_INFO_ATTR      (div.boss-info-attr)
+#   HR_ACTIVE_TIME      (span.boss-active-time)
+#   CHAT_BUTTON         (a.op-btn-chat)
+#   JOB_SALARY          (span.job-salary, span.salary)
+#
+# 示例（去掉行首 # 并修改值即可生效）：
+#
+# boss:
+#   DETAIL_HEADER: "div.job-detail-header-v2"
+#   CHAT_BUTTON: "a.op-btn-chat-new"

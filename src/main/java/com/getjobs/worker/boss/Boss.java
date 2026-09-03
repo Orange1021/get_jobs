@@ -11,6 +11,7 @@ import com.getjobs.worker.utils.JobScoreService;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
 import com.getjobs.worker.utils.RiskGuard;
+import com.getjobs.worker.utils.SelectorRepository;
 import com.getjobs.worker.utils.SessionBudget;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
@@ -78,6 +79,7 @@ public class Boss {
     private final DeliveryPacing pacing = new DeliveryPacing(humanDelay);
     private final RiskGuard riskGuard = new RiskGuard();
     private final JobScoreService jobScoreService = new JobScoreService();
+    private final SelectorRepository selectors = SelectorRepository.getInstance();
     private SessionBudget sessionBudget;
 
     /**
@@ -262,12 +264,24 @@ public class Boss {
             // 使用 URLEncoder 对关键词进行编码
             String encodedKeyword = URLEncoder.encode(normalizedKeyword, StandardCharsets.UTF_8);
 
+            // 解析本关键词会话使用的页面选择器（支持 selectors.yml 外部覆盖）
+            final String selListContainer = selectors.get("boss", "JOB_LIST_CONTAINER",
+                    "//ul[contains(@class, 'rec-job-list')]");
+            final String selJobCards = selectors.get("boss", "JOB_CARDS",
+                    "//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]");
+            final String selJobName = selectors.get("boss", "JOB_NAME_IN_CARD", "a.job-name, span.job-name");
+            final String selDetailHeader = selectors.get("boss", "DETAIL_HEADER", "div.job-detail-header");
+            final String selBossInfo = selectors.get("boss", "BOSS_INFO_ATTR", "div.boss-info-attr");
+            final String selHrActive = selectors.get("boss", "HR_ACTIVE_TIME", "span.boss-active-time");
+            final String selChatBtn = selectors.get("boss", "CHAT_BUTTON", "a.op-btn-chat");
+            final String selSalary = selectors.get("boss", "JOB_SALARY", "span.job-salary, span.salary");
+
             String url = searchUrl + (searchUrl.contains("?") ? "&" : "?") + "query=" + encodedKeyword;
             page.navigate(url, new Page.NavigateOptions()
                     .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
                     .setTimeout(15_000));
             // 等待列表容器出现，确保页面完成首屏渲染
-            page.waitForSelector("//ul[contains(@class, 'rec-job-list')]", new Page.WaitForSelectorOptions().setTimeout(60_000));
+            page.waitForSelector(selListContainer, new Page.WaitForSelectorOptions().setTimeout(60_000));
 
             log.info("【{}】开始边投递边滚动", normalizedKeyword);
 
@@ -298,7 +312,7 @@ public class Boss {
                 }
 
                 // 获取当前可见的岗位
-                Locator cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]");
+                Locator cards = page.locator(selJobCards);
                 int currentCount = cards.count();
 
                 // 如果已处理完当前所有岗位，尝试滚动加载更多
@@ -336,7 +350,7 @@ public class Boss {
                 // 获取卡片上的岗位名称（用于日志）
                 String jobName = "";
                 try {
-                    Locator nameLocator = currentCard.locator("a.job-name, span.job-name");
+                    Locator nameLocator = currentCard.locator(selJobName);
                     if (nameLocator.count() > 0) {
                         jobName = nameLocator.first().textContent();
                     }
@@ -358,7 +372,7 @@ public class Boss {
                     PlaywrightUtil.sleep(1);
 
                     // 2. 等待右侧详情面板加载完成
-                    Locator detailHeader = page.locator("div.job-detail-header");
+                    Locator detailHeader = page.locator(selDetailHeader);
                     try {
                         detailHeader.waitFor(new Locator.WaitForOptions().setTimeout(5000));
                     } catch (Throwable e) {
@@ -373,7 +387,7 @@ public class Boss {
 
                     try {
                         // 获取公司名称和HR职位：格式如 "理想汽车 · HR"
-                        Locator bossInfoAttr = page.locator("div.boss-info-attr");
+                        Locator bossInfoAttr = page.locator(selBossInfo);
                         if (bossInfoAttr.count() > 0) {
                             String infoText = bossInfoAttr.first().textContent();
                             if (infoText != null && infoText.contains("·")) {
@@ -384,7 +398,7 @@ public class Boss {
                         }
 
                         // 获取HR活跃状态
-                        Locator activeTime = page.locator("span.boss-active-time");
+                        Locator activeTime = page.locator(selHrActive);
                         if (activeTime.count() > 0) {
                             hrActiveStatus = activeTime.first().textContent();
                         }
@@ -442,7 +456,7 @@ public class Boss {
                     String salaryText = "";
                     String welfareText = "";
                     try {
-                        Locator salaryLocator = currentCard.locator("span.job-salary, span.salary");
+                        Locator salaryLocator = currentCard.locator(selSalary);
                         if (salaryLocator.count() > 0) {
                             salaryText = salaryLocator.first().textContent();
                         }
@@ -463,7 +477,7 @@ public class Boss {
                     }
 
                     // 3. 在右侧详情面板中查找"立即沟通"按钮
-                    Locator chatBtn = detailHeader.locator("a.op-btn-chat");
+                    Locator chatBtn = detailHeader.locator(selChatBtn);
 
                     if (chatBtn.count() == 0) {
                         log.warn("右侧详情面板未找到立即沟通按钮，跳过 | 岗位：{}", jobName);

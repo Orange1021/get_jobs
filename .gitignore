@@ -88,3 +88,8 @@ nul
 # Keep wrapper binaries (if present)
 # ==============================
 !.mvn/wrapper/maven-wrapper.jar
+
+# ==============================
+# 选择器本地覆盖文件（见 selectors.yml.example）
+# ==============================
+selectors.yml
