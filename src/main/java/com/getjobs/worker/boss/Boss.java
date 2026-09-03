@@ -7,6 +7,7 @@ import com.getjobs.application.service.KeywordDeliveryQuotaService;
 import com.getjobs.worker.utils.DeliveryPacing;
 import com.getjobs.worker.utils.HumanDelay;
 import com.getjobs.worker.utils.Job;
+import com.getjobs.worker.utils.JobScoreService;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
 import com.getjobs.worker.utils.RiskGuard;
@@ -76,6 +77,7 @@ public class Boss {
     private final HumanDelay humanDelay = new HumanDelay();
     private final DeliveryPacing pacing = new DeliveryPacing(humanDelay);
     private final RiskGuard riskGuard = new RiskGuard();
+    private final JobScoreService jobScoreService = new JobScoreService();
     private SessionBudget sessionBudget;
 
     /**
@@ -436,6 +438,30 @@ public class Boss {
                         continue;
                     }
 
+                    // 2.8 岗位质量评分门控：低分岗位跳过，把配额留给高分岗位
+                    String salaryText = "";
+                    String welfareText = "";
+                    try {
+                        Locator salaryLocator = currentCard.locator("span.job-salary, span.salary");
+                        if (salaryLocator.count() > 0) {
+                            salaryText = salaryLocator.first().textContent();
+                        }
+                        Locator tagLocator = currentCard.locator(TAG_LIST);
+                        if (tagLocator.count() > 0) {
+                            welfareText = String.join(",", tagLocator.allTextContents());
+                        }
+                    } catch (Throwable ignore) {}
+
+                    JobScoreService.JobFacts facts = new JobScoreService.JobFacts(
+                            jobName, companyName, salaryText, hrActiveStatus, welfareText, normalizedKeyword);
+                    int jobScore = jobScoreService.score(facts, config.getExpectedSalary());
+                    if (!jobScoreService.shouldDeliver(jobScore, config.getQualityScoreThreshold())) {
+                        log.info("被过滤：岗位评分不足 | 岗位：{} | 评分：{} | 阈值：{}",
+                                jobName, jobScore, config.getQualityScoreThreshold());
+                        processedIndex++;
+                        continue;
+                    }
+
                     // 3. 在右侧详情面板中查找"立即沟通"按钮
                     Locator chatBtn = detailHeader.locator("a.op-btn-chat");
 
@@ -466,8 +492,8 @@ public class Boss {
                     postCount++;
                     todayCount = keywordDeliveryQuotaService.recordDelivery(PLATFORM_NAME, normalizedKeyword);
                     sessionBudget.recordDelivery();
-                    log.info("投递成功 | 关键词：{} | 第 {} 个岗位 | 岗位：{} | 会话已投：{}",
-                            normalizedKeyword, processedIndex + 1, jobName, sessionBudget.deliveredCount());
+                    log.info("投递成功 | 关键词：{} | 第 {} 个岗位 | 岗位：{} | 会话已投：{} | 岗位评分：{}",
+                            normalizedKeyword, processedIndex + 1, jobName, sessionBudget.deliveredCount(), jobScore);
 
                     // 创建Job对象并添加到结果列表（用于统计）
                     Job job = new Job();
