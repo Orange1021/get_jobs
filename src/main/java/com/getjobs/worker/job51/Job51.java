@@ -2,8 +2,10 @@ package com.getjobs.worker.job51;
 
 import com.getjobs.application.service.Job51Service;
 import com.getjobs.application.service.KeywordDeliveryQuotaService;
+import com.getjobs.worker.utils.DeliveryPacing;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
+import com.getjobs.worker.utils.SessionBudget;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.WaitForSelectorState;
@@ -14,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -56,8 +59,14 @@ public class Job51 {
     private static final int DEFAULT_MAX_PAGE = 50;
     private static final String BASE_URL = "https://we.51job.com/pc/search?";
     private static final int MAX_DAILY_DELIVERIES_PER_KEYWORD = 10;
-    private static final int DELIVERY_DELAY_SECONDS = 10;
     private static final String PLATFORM_NAME = "51job";
+
+    // ===== 会话防封预算 =====
+    private static final int SESSION_MAX_DELIVERIES = 60;
+    private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
+
+    private final DeliveryPacing pacing = new DeliveryPacing();
+    private SessionBudget sessionBudget;
 
     /**
      * 进度回调接口
@@ -80,6 +89,12 @@ public class Job51 {
      */
     public int execute() {
         long startTime = System.currentTimeMillis();
+        sessionBudget = SessionBudget.builder()
+                .maxDeliveries(SESSION_MAX_DELIVERIES)
+                .maxDuration(SESSION_MAX_DURATION)
+                .build();
+        log.info("[51job] 会话预算已初始化: 最大投递 {} 个岗位, 最长运行 {} 分钟",
+                SESSION_MAX_DELIVERIES, SESSION_MAX_DURATION.toMinutes());
 
         try {
             // 检查配置是否有效
@@ -99,6 +114,12 @@ public class Job51 {
             for (String keyword : config.getKeywords()) {
                 if (shouldStop()) {
                     sendProgress("用户取消投递", null, null);
+                    break;
+                }
+
+                if (sessionBudget.isExhausted()) {
+                    log.info("[51job] 会话预算耗尽，提前收工 | 已投递 {} 个岗位", sessionBudget.deliveredCount());
+                    sendProgress("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", null, null);
                     break;
                 }
 
@@ -231,6 +252,12 @@ public class Job51 {
                     return;
                 }
 
+                if (sessionBudget.isExhausted()) {
+                    log.info("[51job] 会话预算在投递中途耗尽 | 已投递 {} 个岗位", sessionBudget.deliveredCount());
+                    sendProgress("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", null, null);
+                    return;
+                }
+
                 sendProgress(String.format("正在投递第%d页", pageNum), pageNum, DEFAULT_MAX_PAGE);
                 currentPageNum = pageNum;
 
@@ -267,8 +294,10 @@ public class Job51 {
                     int accepted = Math.min(deliveredThisPage, MAX_DAILY_DELIVERIES_PER_KEYWORD - todayCount);
                     for (int d = 0; d < accepted; d++) {
                         todayCount = keywordDeliveryQuotaService.recordDelivery(PLATFORM_NAME, keyword);
+                        sessionBudget.recordDelivery();
                     }
-                    PlaywrightUtil.sleep(DELIVERY_DELAY_SECONDS);
+                    // 投递间隔：高斯随机延迟，避免固定间隔暴露自动化特征
+                    pacing.betweenDeliveries();
                 }
 
                 if (todayCount >= MAX_DAILY_DELIVERIES_PER_KEYWORD) {

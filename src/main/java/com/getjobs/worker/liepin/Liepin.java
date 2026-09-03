@@ -1,6 +1,8 @@
 package com.getjobs.worker.liepin;
 
+import com.getjobs.worker.utils.DeliveryPacing;
 import com.getjobs.worker.utils.PlaywrightUtil;
+import com.getjobs.worker.utils.SessionBudget;
 import com.getjobs.application.service.LiepinService;
 import com.getjobs.application.service.KeywordDeliveryQuotaService;
 import com.getjobs.application.entity.LiepinEntity;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 
 // 移除保存页面源码相关的导入
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -46,8 +49,14 @@ public class Liepin {
 
     // 限流常量
     private static final int MAX_DAILY_DELIVERIES_PER_KEYWORD = 10;
-    private static final int DELIVERY_DELAY_SECONDS = 10;
     private static final String PLATFORM_NAME = "liepin";
+
+    // ===== 会话防封预算 =====
+    private static final int SESSION_MAX_DELIVERIES = 60;
+    private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
+
+    private final DeliveryPacing pacing = new DeliveryPacing();
+    private SessionBudget sessionBudget;
 
     @Setter
     private LiepinConfig config;
@@ -127,9 +136,21 @@ public class Liepin {
             return 0;
         }
 
+        // 每次会话重置预算：防止单次会话过量投递触发风控
+        sessionBudget = SessionBudget.builder()
+                .maxDeliveries(SESSION_MAX_DELIVERIES)
+                .maxDuration(SESSION_MAX_DURATION)
+                .build();
+        info(String.format("会话预算已初始化: 最大投递 %d 个岗位, 最长运行 %d 分钟",
+                SESSION_MAX_DELIVERIES, SESSION_MAX_DURATION.toMinutes()));
+
         for (String keyword : keywords) {
             if (shouldStop()) {
                 info("收到停止指令，提前结束关键词循环");
+                break;
+            }
+            if (sessionBudget.isExhausted()) {
+                info(String.format("会话预算耗尽，提前收工 | 已投递 %d 个岗位", sessionBudget.deliveredCount()));
                 break;
             }
             // 清洗关键词
@@ -262,7 +283,13 @@ public class Liepin {
                 info("关键词【" + cleanKeyword + "】达到日上限，停止投递");
                 return;
             }
-            
+
+            // 会话预算耗尽则整体收工
+            if (sessionBudget.isExhausted()) {
+                info(String.format("会话预算在投递中途耗尽 | 已投递 %d 个岗位", sessionBudget.deliveredCount()));
+                return;
+            }
+
             if (shouldStop()) {
                 info("收到停止指令，结束分页循环");
                 return;
@@ -302,6 +329,7 @@ public class Liepin {
                 // 记录投递次数
                 for (int d = 0; d < deliveredThisPage; d++) {
                     todayCount = keywordDeliveryQuotaService.recordDelivery(PLATFORM_NAME, cleanKeyword);
+                    sessionBudget.recordDelivery();
                     if (todayCount >= MAX_DAILY_DELIVERIES_PER_KEYWORD) {
                         info("关键词【" + cleanKeyword + "】达到日上限，停止投递");
                         return;
@@ -601,8 +629,8 @@ public class Liepin {
                         if (jobIdForUpdate != null) {
                             liepinService.markDelivered(jobIdForUpdate);
                         }
-                        // 每个岗位投递成功后休眠 10 秒
-                        PlaywrightUtil.sleep(DELIVERY_DELAY_SECONDS);
+                        // 每个岗位投递成功后：高斯随机延迟，避免固定间隔暴露自动化特征
+                        pacing.betweenDeliveries();
                         
                     } catch (Exception e) {
                         log.warn("关闭聊天窗口失败，但投递可能已成功: {}", e.getMessage());
@@ -613,8 +641,8 @@ public class Liepin {
                         if (jobIdForUpdate != null) {
                             liepinService.markDelivered(jobIdForUpdate);
                         }
-                        // 每个岗位投递成功后休眠 10 秒
-                        PlaywrightUtil.sleep(DELIVERY_DELAY_SECONDS);
+                        // 每个岗位投递成功后：高斯随机延迟，避免固定间隔暴露自动化特征
+                        pacing.betweenDeliveries();
                     }
                     
                 } catch (Exception e) {

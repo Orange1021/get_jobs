@@ -3,9 +3,11 @@ package com.getjobs.worker.zhilian;
 import com.getjobs.application.entity.ZhilianJobDataEntity;
 import com.getjobs.application.service.ZhilianService;
 import com.getjobs.application.service.KeywordDeliveryQuotaService;
+import com.getjobs.worker.utils.DeliveryPacing;
 import com.getjobs.worker.utils.Job;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
+import com.getjobs.worker.utils.SessionBudget;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -49,8 +52,14 @@ public class ZhiLian {
 
     // 限流常量
     private static final int MAX_DAILY_DELIVERIES_PER_KEYWORD = 10;
-    private static final int DELIVERY_DELAY_SECONDS = 10;
     private static final String PLATFORM_NAME = "zhilian";
+
+    // ===== 会话防封预算 =====
+    private static final int SESSION_MAX_DELIVERIES = 60;
+    private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
+
+    private final DeliveryPacing pacing = new DeliveryPacing();
+    private SessionBudget sessionBudget;
 
     private final ZhilianService zhilianService;
     private final KeywordDeliveryQuotaService keywordDeliveryQuotaService;
@@ -95,11 +104,25 @@ public class ZhiLian {
         log.info("智联招聘投递任务开始...");
         long startTime = System.currentTimeMillis();
 
+        // 每次会话重置预算：防止单次会话过量投递触发风控
+        sessionBudget = SessionBudget.builder()
+                .maxDeliveries(SESSION_MAX_DELIVERIES)
+                .maxDuration(SESSION_MAX_DURATION)
+                .build();
+        log.info("会话预算已初始化: 最大投递 {} 个岗位, 最长运行 {} 分钟",
+                SESSION_MAX_DELIVERIES, SESSION_MAX_DURATION.toMinutes());
+
         try {
             // 遍历所有关键词进行投递
             for (String keyword : config.getKeywords()) {
                 if (shouldStop() || isLimit) {
                     sendProgress("用户取消投递或已达上限", null, null);
+                    break;
+                }
+
+                if (sessionBudget.isExhausted()) {
+                    log.info("会话预算耗尽，提前收工 | 已投递 {} 个岗位", sessionBudget.deliveredCount());
+                    sendProgress("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", null, null);
                     break;
                 }
 
@@ -184,7 +207,14 @@ public class ZhiLian {
                     log.info("关键词【{}】达到日上限，停止投递", keyword);
                     return;
                 }
-                
+
+                // 会话预算耗尽则整体收工
+                if (sessionBudget.isExhausted()) {
+                    log.info("会话预算在投递中途耗尽 | 已投递 {} 个岗位", sessionBudget.deliveredCount());
+                    sendProgress("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", null, null);
+                    return;
+                }
+
                 if (shouldStop() || isLimit) {
                     sendProgress("用户取消投递或已达上限", null, null);
                     return;
@@ -211,6 +241,7 @@ public class ZhiLian {
                     // 记录投递次数
                     for (int d = 0; d < deliveredThisPage; d++) {
                         todayCount = keywordDeliveryQuotaService.recordDelivery(PLATFORM_NAME, keyword);
+                        sessionBudget.recordDelivery();
                         if (todayCount >= MAX_DAILY_DELIVERIES_PER_KEYWORD) {
                             log.info("关键词【{}】达到日上限，停止投递", keyword);
                             return;
@@ -376,14 +407,14 @@ public class ZhiLian {
                             zhilianService.markDeliveredByJobId(pj.jobId);
                             log.info("已标记投递：jobId={}，title={}，company={}", pj.jobId, pj.jobTitle, pj.companyName);
                             delivered++;
-                            // 每个岗位投递成功后休眠 10 秒
-                            PlaywrightUtil.sleep(DELIVERY_DELAY_SECONDS);
+                            // 每个岗位投递成功后：高斯随机延迟，避免固定间隔暴露自动化特征
+                            pacing.betweenDeliveries();
                         } else if (pj.jobTitle != null && pj.companyName != null) {
                             zhilianService.markDeliveredByTitleAndCompany(pj.jobTitle, pj.companyName);
                             log.info("已标记投递：title={}，company={}", pj.jobTitle, pj.companyName);
                             delivered++;
-                            // 每个岗位投递成功后休眠 10 秒
-                            PlaywrightUtil.sleep(DELIVERY_DELAY_SECONDS);
+                            // 每个岗位投递成功后：高斯随机延迟，避免固定间隔暴露自动化特征
+                            pacing.betweenDeliveries();
                         }
                     } catch (Exception ex) {
                         log.warn("更新投递状态失败: {}", ex.getMessage());
