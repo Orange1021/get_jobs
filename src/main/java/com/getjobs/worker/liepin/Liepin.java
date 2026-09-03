@@ -1,6 +1,7 @@
 package com.getjobs.worker.liepin;
 
 import com.getjobs.worker.utils.DeliveryPacing;
+import com.getjobs.worker.utils.JobScoreService;
 import com.getjobs.worker.utils.PlaywrightUtil;
 import com.getjobs.worker.utils.SessionBudget;
 import com.getjobs.application.service.LiepinService;
@@ -56,6 +57,7 @@ public class Liepin {
     private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
 
     private final DeliveryPacing pacing = new DeliveryPacing();
+    private final JobScoreService jobScoreService = new JobScoreService();
     private SessionBudget sessionBudget;
 
     @Setter
@@ -323,7 +325,7 @@ public class Liepin {
             
             // 计算剩余配额并投递
             int remaining = MAX_DAILY_DELIVERIES_PER_KEYWORD - todayCount;
-            int deliveredThisPage = submitJob(remaining);
+            int deliveredThisPage = submitJob(cleanKeyword, remaining);
             
             if (deliveredThisPage > 0) {
                 // 记录投递次数
@@ -391,7 +393,7 @@ public class Liepin {
         }
     }
 
-    private int submitJob(int maxDeliverCount) {
+    private int submitJob(String keyword, int maxDeliverCount) {
         // 获取hr数量
         Locator jobCards = page.locator(JOB_CARDS);
         int count = jobCards.count();
@@ -420,7 +422,17 @@ public class Liepin {
             if (jobName == null) jobName = "岗位";
             if (companyName == null) companyName = "公司";
             if (salary == null) salary = "";
-            
+
+            // 岗位质量评分门控：低分岗位跳过，把配额留给高分岗位
+            JobScoreService.JobFacts scoreFacts = new JobScoreService.JobFacts(
+                    jobName, companyName, salary, null, "", keyword);
+            int jobScore = jobScoreService.score(scoreFacts);
+            if (!jobScoreService.shouldDeliver(jobScore, config.getQualityScoreThreshold())) {
+                info(String.format("被过滤：岗位评分不足 | 岗位：%s | 评分：%d | 阈值：%s",
+                        jobName, jobScore, config.getQualityScoreThreshold()));
+                continue;
+            }
+
             try {
                 // 使用JavaScript滚动到卡片位置，更稳定
                 try {

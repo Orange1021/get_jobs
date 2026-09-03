@@ -3,6 +3,7 @@ package com.getjobs.worker.job51;
 import com.getjobs.application.service.Job51Service;
 import com.getjobs.application.service.KeywordDeliveryQuotaService;
 import com.getjobs.worker.utils.DeliveryPacing;
+import com.getjobs.worker.utils.JobScoreService;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
 import com.getjobs.worker.utils.SessionBudget;
@@ -66,6 +67,7 @@ public class Job51 {
     private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
 
     private final DeliveryPacing pacing = new DeliveryPacing();
+    private final JobScoreService jobScoreService = new JobScoreService();
     private SessionBudget sessionBudget;
 
     /**
@@ -289,7 +291,7 @@ public class Job51 {
                     break;
                 }
 
-                int deliveredThisPage = deliverCurrentPage(remaining);
+                int deliveredThisPage = deliverCurrentPage(keyword, remaining);
                 if (deliveredThisPage > 0) {
                     int accepted = Math.min(deliveredThisPage, MAX_DAILY_DELIVERIES_PER_KEYWORD - todayCount);
                     for (int d = 0; d < accepted; d++) {
@@ -317,7 +319,7 @@ public class Job51 {
     /**
      * 投递当前页面的所有职位
      */
-    private int deliverCurrentPage(int maxDeliverCount) {
+    private int deliverCurrentPage(String currentKeyword, int maxDeliverCount) {
         try {
             PlaywrightUtil.sleep(1);
 
@@ -340,11 +342,32 @@ public class Job51 {
 
                 try {
                     Locator checkbox = checkboxes.nth(i);
-                    // 使用JavaScript点击，避免元素被遮挡
-                    checkbox.evaluate("el => el.click()");
 
                     String title = i < titles.count() ? titles.nth(i).textContent() : "未知职位";
                     String company = i < companies.count() ? companies.nth(i).textContent() : "未知公司";
+
+                    // 岗位质量评分门控：低分岗位不勾选，把配额留给高分岗位
+                    String salaryText = "";
+                    try {
+                        Locator salaryLocator = checkboxes.nth(i)
+                                .locator("xpath=ancestor::li//*[contains(@class,'salary')]");
+                        if (salaryLocator.count() > 0) {
+                            salaryText = salaryLocator.first().textContent();
+                        }
+                    } catch (Throwable ignore) {}
+                    String scoreKeyword = currentKeyword == null ? "" : currentKeyword;
+                    JobScoreService.JobFacts scoreFacts = new JobScoreService.JobFacts(
+                            title, company, salaryText, null, "", scoreKeyword);
+                    int jobScore = jobScoreService.score(scoreFacts);
+                    if (!jobScoreService.shouldDeliver(jobScore, config.getQualityScoreThreshold())) {
+                        log.info("[51job] 被过滤：岗位评分不足 | 岗位：{} | 评分：{} | 阈值：{}",
+                                title, jobScore, config.getQualityScoreThreshold());
+                        continue;
+                    }
+
+                    // 使用JavaScript点击，避免元素被遮挡
+                    checkbox.evaluate("el => el.click()");
+
                     String jobInfo = company + " | " + title;
                     resultList.add(jobInfo);
 //                    log.info("选中: {}", jobInfo);

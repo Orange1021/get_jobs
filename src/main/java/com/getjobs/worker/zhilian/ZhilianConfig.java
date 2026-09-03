@@ -36,4 +36,9 @@ public class ZhilianConfig {
         throw new UnsupportedOperationException("请在 ZhilianJobService 中通过 ConfigService 构建配置");
     }
 
+    /**
+     * 岗位质量评分投递阈值（0~100）。低于该分数的岗位跳过不投；
+     * null 或 0 表示不启用评分门控（保持原有全部投递行为）。
+     */
+    private Integer qualityScoreThreshold;
 }

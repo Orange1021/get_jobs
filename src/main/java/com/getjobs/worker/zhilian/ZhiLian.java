@@ -5,6 +5,7 @@ import com.getjobs.application.service.ZhilianService;
 import com.getjobs.application.service.KeywordDeliveryQuotaService;
 import com.getjobs.worker.utils.DeliveryPacing;
 import com.getjobs.worker.utils.Job;
+import com.getjobs.worker.utils.JobScoreService;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
 import com.getjobs.worker.utils.SessionBudget;
@@ -59,6 +60,7 @@ public class ZhiLian {
     private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
 
     private final DeliveryPacing pacing = new DeliveryPacing();
+    private final JobScoreService jobScoreService = new JobScoreService();
     private SessionBudget sessionBudget;
 
     private final ZhilianService zhilianService;
@@ -69,12 +71,14 @@ public class ZhiLian {
         String jobId;
         String jobTitle;
         String companyName;
+        String salary;
 
-        PageJob(int index, String jobId, String jobTitle, String companyName) {
+        PageJob(int index, String jobId, String jobTitle, String companyName, String salary) {
             this.index = index;
             this.jobId = jobId;
             this.jobTitle = jobTitle;
             this.companyName = companyName;
+            this.salary = salary;
         }
     }
 
@@ -349,7 +353,7 @@ public class ZhiLian {
                     log.warn("采集岗位数据失败: {}", ex.getMessage());
                 }
 
-                jobs.add(new PageJob(i, jobId, jobTitle, companyName));
+                jobs.add(new PageJob(i, jobId, jobTitle, companyName, salary));
             }
 
             // 统一保存采集到的一整页岗位
@@ -375,6 +379,17 @@ public class ZhiLian {
                 }
 
                 Locator card = page.locator("div.joblist-box__item").nth(pj.index);
+
+                // 岗位质量评分门控：低分岗位跳过，把配额留给高分岗位
+                JobScoreService.JobFacts scoreFacts = new JobScoreService.JobFacts(
+                        pj.jobTitle, pj.companyName, pj.salary, null, "", keyword);
+                int jobScore = jobScoreService.score(scoreFacts);
+                if (!jobScoreService.shouldDeliver(jobScore, config.getQualityScoreThreshold())) {
+                    log.info("被过滤：岗位评分不足 | 岗位：{} | 评分：{} | 阈值：{}",
+                            pj.jobTitle, jobScore, config.getQualityScoreThreshold());
+                    continue;
+                }
+
                 Locator applyBtn = card.locator("button.collect-and-apply__btn");
                 if (applyBtn.count() == 0) {
                     log.info("岗位【{}】未找到立即投递按钮，跳过", pj.jobTitle);
