@@ -25,6 +25,10 @@
 
 先看环境要求文档：[REQUIREMENTS.md](REQUIREMENTS.md)
 
+> 🤖 **用 AI 部署？** 把 [AI_SETUP_GUIDE.md](AI_SETUP_GUIDE.md) 喂给任意 AI 助手
+> （Claude Code / Codex 等），它会带着验证命令一步步帮你把项目跑起来。
+> 项目全貌见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
+
 ### 1. 启动后端（端口 8888）
 
 Windows:

@@ -298,6 +298,9 @@ src/test/java/com/getjobs/
 
 ## 9. 构建与运行
 
+> 🤖 AI 助手部署运行请优先按 **[AI_SETUP_GUIDE.md](AI_SETUP_GUIDE.md)** 执行
+> （逐步带验证命令的部署手册，覆盖启动→登录→配置→投递→监控→排障全流程）。
+
 ```bash
 # 环境要求：JDK 21（toolchain 强制）、Node.js（前端）
 ./gradlew test                 # 跑全部测试
