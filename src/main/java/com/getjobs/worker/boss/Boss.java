@@ -81,6 +81,8 @@ public class Boss {
     private final JobScoreService jobScoreService = new JobScoreService();
     private final SelectorRepository selectors = SelectorRepository.getInstance();
     private SessionBudget sessionBudget;
+    /** 风控熔断信号：一旦触发，整个投递会话（所有城市/关键词）全部终止。 */
+    private volatile boolean riskBreakTriggered = false;
 
     /**
      * 进度回调接口
@@ -116,9 +118,14 @@ public class Boss {
                 .maxDeliveries(SESSION_MAX_DELIVERIES)
                 .maxDuration(SESSION_MAX_DURATION)
                 .build();
+        riskBreakTriggered = false;
         log.info("会话预算已初始化: 最大投递 {} 个岗位, 最长运行 {} 分钟",
                 SESSION_MAX_DELIVERIES, SESSION_MAX_DURATION.toMinutes());
         for (String cityCode : config.getCityCode()) {
+            if (riskBreakTriggered) {
+                log.warn("风控熔断信号已触发，终止所有城市的投递");
+                break;
+            }
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 progressCallback.accept("用户取消投递", 0, 0);
                 break;
@@ -306,6 +313,7 @@ public class Boss {
                 // 风控熔断：检测到滑块验证/验证码/风控文本/登录失效，立即停止投递
                 RiskGuard.Result risk = riskGuard.check(this::probeRiskSignals);
                 if (risk.confirmed()) {
+                    riskBreakTriggered = true;
                     log.warn("风控熔断：{} | 已投递 {} 个岗位，本轮会话终止", risk.reason(), sessionBudget.deliveredCount());
                     progressCallback.accept("⚠️ 风控熔断：" + risk.reason() + "（已投 " + sessionBudget.deliveredCount() + " 个，请人工检查账号状态）", processedIndex, -1);
                     return;
@@ -377,6 +385,7 @@ public class Boss {
                         detailHeader.waitFor(new Locator.WaitForOptions().setTimeout(5000));
                     } catch (Throwable e) {
                         log.warn("等待右侧详情面板超时，跳过 | 岗位：{}", jobName);
+                        processedIndex++;
                         continue;
                     }
 
@@ -481,6 +490,7 @@ public class Boss {
 
                     if (chatBtn.count() == 0) {
                         log.warn("右侧详情面板未找到立即沟通按钮，跳过 | 岗位：{}", jobName);
+                        processedIndex++;
                         continue;
                     }
 
@@ -492,6 +502,7 @@ public class Boss {
 
                     if (btnText == null || !btnText.contains("立即沟通")) {
                         log.info("按钮文本为 [{}]，可能已沟通过，跳过 | 岗位：{}", btnText, jobName);
+                        processedIndex++;
                         continue;
                     }
 
@@ -1288,32 +1299,6 @@ public class Boss {
             return RiskGuard.Signals.empty();
         }
     }
-
-    private void waitForSliderVerify(Page page) {
-        String SLIDER_URL = "https://www.zhipin.com/web/user/safe/verify-slider";
-        // 最多等待5分钟（防呆，防止死循环）
-        long start = System.currentTimeMillis();
-        while (true) {
-            String url = page.url();
-            if (url != null && url.startsWith(SLIDER_URL)) {
-                progressCallback.accept("请手动完成Boss直聘滑块验证，通过后在控制台回车继续...", 0, 0);
-                System.out.println("\n【滑块验证】请手动完成Boss直聘滑块验证，通过后在控制台回车继续…");
-                try {
-                    System.in.read();
-                } catch (Exception e) {
-                    log.error("等待滑块验证输入异常: {}", e.getMessage());
-                }
-                PlaywrightUtil.sleep(1);
-                // 验证通过后页面url会变，循环再检测一次
-                continue;
-            }
-            if ((System.currentTimeMillis() - start) > 5 * 60 * 1000) {
-                throw new RuntimeException("滑块验证超时！");
-            }
-            break;
-        }
-    }
-
 
     private boolean isLoginRequired() {
         try {

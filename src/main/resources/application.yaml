@@ -17,6 +17,11 @@ spring:
     hikari:
       maximum-pool-size: 5
       connection-test-query: SELECT 1
+      # SQLite 并发加固：WAL 模式允许读写并行；busy_timeout 让写锁冲突时
+      # 等待最多 5 秒而非立即抛 SQLITE_BUSY（多平台并发投递时防止计数丢失）
+      data-source-properties:
+        journal_mode: WAL
+        busy_timeout: 5000
   sql:
     init:
       mode: never  # 数据库文件已存在，不需要自动初始化
