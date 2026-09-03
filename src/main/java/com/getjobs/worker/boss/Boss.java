@@ -9,6 +9,7 @@ import com.getjobs.worker.utils.HumanDelay;
 import com.getjobs.worker.utils.Job;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
+import com.getjobs.worker.utils.RiskGuard;
 import com.getjobs.worker.utils.SessionBudget;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
@@ -74,6 +75,7 @@ public class Boss {
 
     private final HumanDelay humanDelay = new HumanDelay();
     private final DeliveryPacing pacing = new DeliveryPacing(humanDelay);
+    private final RiskGuard riskGuard = new RiskGuard();
     private SessionBudget sessionBudget;
 
     /**
@@ -282,6 +284,14 @@ public class Boss {
                 if (sessionBudget.isExhausted()) {
                     log.info("会话预算在投递中途耗尽 | 已投递 {} 个岗位", sessionBudget.deliveredCount());
                     progressCallback.accept("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", processedIndex, -1);
+                    return;
+                }
+
+                // 风控熔断：检测到滑块验证/验证码/风控文本/登录失效，立即停止投递
+                RiskGuard.Result risk = riskGuard.check(this::probeRiskSignals);
+                if (risk.confirmed()) {
+                    log.warn("风控熔断：{} | 已投递 {} 个岗位，本轮会话终止", risk.reason(), sessionBudget.deliveredCount());
+                    progressCallback.accept("⚠️ 风控熔断：" + risk.reason() + "（已投 " + sessionBudget.deliveredCount() + " 个，请人工检查账号状态）", processedIndex, -1);
                     return;
                 }
 
@@ -1195,6 +1205,48 @@ public class Boss {
             log.error("薪资解析异常！{}", e.getMessage(), e);
         }
         return null;
+    }
+
+    /**
+     * 采集当前页面风控信号，供 {@link RiskGuard} 判定。
+     * 任何探测异常都按"无信号"处理，绝不因探测失败中断投递主流程。
+     */
+    private RiskGuard.Signals probeRiskSignals() {
+        try {
+            String url = page.url() == null ? "" : page.url();
+            boolean slider = url.contains("safe/verify");
+
+            boolean captcha = false;
+            for (String selector : new String[]{
+                    "iframe[src*='captcha']", ".geetest_panel", ".geetest_ghost",
+                    ".nc-container", "#nc_1_wrapper", "div.index-sms"}) {
+                try {
+                    if (page.locator(selector).count() > 0) {
+                        captcha = true;
+                        break;
+                    }
+                } catch (Throwable ignore) {}
+            }
+
+            boolean riskText = false;
+            try {
+                Locator body = page.locator("body");
+                if (body.count() > 0) {
+                    riskText = RiskGuard.looksLikeRiskText(body.first().textContent());
+                }
+            } catch (Throwable ignore) {}
+
+            boolean loginRequired = false;
+            try {
+                Locator loginBtn = page.locator(LOGIN_BTNS);
+                loginRequired = loginBtn.count() > 0 && loginBtn.first().textContent().contains("登录");
+            } catch (Throwable ignore) {}
+
+            return new RiskGuard.Signals(url, slider, captcha, riskText, loginRequired);
+        } catch (Throwable t) {
+            log.debug("风控信号采集失败（按无信号处理）: {}", t.getMessage());
+            return RiskGuard.Signals.empty();
+        }
     }
 
     private void waitForSliderVerify(Page page) {
