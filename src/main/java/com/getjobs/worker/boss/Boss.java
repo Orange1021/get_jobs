@@ -4,9 +4,12 @@ import com.getjobs.application.entity.AiEntity;
 import com.getjobs.application.service.AiService;
 import com.getjobs.application.service.BossService;
 import com.getjobs.application.service.KeywordDeliveryQuotaService;
+import com.getjobs.worker.utils.DeliveryPacing;
+import com.getjobs.worker.utils.HumanDelay;
 import com.getjobs.worker.utils.Job;
 import com.getjobs.worker.utils.JobUtils;
 import com.getjobs.worker.utils.PlaywrightUtil;
+import com.getjobs.worker.utils.SessionBudget;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Response;
@@ -23,6 +26,7 @@ import java.math.RoundingMode;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -62,8 +66,15 @@ public class Boss {
 
     private final List<Job> resultList = new ArrayList<>();
     private static final int MAX_DAILY_DELIVERIES_PER_KEYWORD = 10;
-    private static final int DELIVERY_DELAY_SECONDS = 10;
     private static final String PLATFORM_NAME = "boss";
+
+    // ===== 会话防封预算：单次投递会话的总量约束，任一维度耗尽即收工 =====
+    private static final int SESSION_MAX_DELIVERIES = 60;
+    private static final Duration SESSION_MAX_DURATION = Duration.ofHours(2);
+
+    private final HumanDelay humanDelay = new HumanDelay();
+    private final DeliveryPacing pacing = new DeliveryPacing(humanDelay);
+    private SessionBudget sessionBudget;
 
     /**
      * 进度回调接口
@@ -94,6 +105,13 @@ public class Boss {
      * 执行投递
      */
     public int execute() {
+        // 每次会话重置预算：防止单次会话过量投递触发风控
+        sessionBudget = SessionBudget.builder()
+                .maxDeliveries(SESSION_MAX_DELIVERIES)
+                .maxDuration(SESSION_MAX_DURATION)
+                .build();
+        log.info("会话预算已初始化: 最大投递 {} 个岗位, 最长运行 {} 分钟",
+                SESSION_MAX_DELIVERIES, SESSION_MAX_DURATION.toMinutes());
         for (String cityCode : config.getCityCode()) {
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 progressCallback.accept("用户取消投递", 0, 0);
@@ -222,6 +240,14 @@ public class Boss {
                 return;
             }
 
+            // 检查会话预算，耗尽则整体收工
+            if (sessionBudget.isExhausted()) {
+                log.info("会话预算耗尽，提前收工 | 已投递 {} 个岗位, 剩余关键词[{}]跳过",
+                        sessionBudget.deliveredCount(), normalizedKeyword);
+                progressCallback.accept("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", 0, 0);
+                return;
+            }
+
             int todayCount = keywordDeliveryQuotaService.getTodayCount(PLATFORM_NAME, normalizedKeyword);
             if (todayCount >= MAX_DAILY_DELIVERIES_PER_KEYWORD) {
                 progressCallback.accept("Keyword daily limit reached, skip: " + normalizedKeyword, 0, MAX_DAILY_DELIVERIES_PER_KEYWORD);
@@ -245,10 +271,17 @@ public class Boss {
             int processedIndex = 0; // 已处理的岗位索引
             int noNewCardsCount = 0; // 连续无新岗位的次数
 
-            while (todayCount < MAX_DAILY_DELIVERIES_PER_KEYWORD) {
+            while (todayCount < MAX_DAILY_DELIVERIES_PER_KEYWORD && !sessionBudget.isExhausted()) {
                 // 检查是否需要停止
                 if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                     progressCallback.accept("用户取消投递", processedIndex, -1);
+                    return;
+                }
+
+                // 预算中途耗尽（数量或时长），记录进度后收工
+                if (sessionBudget.isExhausted()) {
+                    log.info("会话预算在投递中途耗尽 | 已投递 {} 个岗位", sessionBudget.deliveredCount());
+                    progressCallback.accept("会话预算耗尽，停止投递（已投 " + sessionBudget.deliveredCount() + " 个）", processedIndex, -1);
                     return;
                 }
 
@@ -422,7 +455,9 @@ public class Boss {
                     // 6. 记录投递成功
                     postCount++;
                     todayCount = keywordDeliveryQuotaService.recordDelivery(PLATFORM_NAME, normalizedKeyword);
-                    log.info("投递成功 | 关键词：{} | 第 {} 个岗位 | 岗位：{}", normalizedKeyword, processedIndex + 1, jobName);
+                    sessionBudget.recordDelivery();
+                    log.info("投递成功 | 关键词：{} | 第 {} 个岗位 | 岗位：{} | 会话已投：{}",
+                            normalizedKeyword, processedIndex + 1, jobName, sessionBudget.deliveredCount());
 
                     // 创建Job对象并添加到结果列表（用于统计）
                     Job job = new Job();
@@ -433,8 +468,8 @@ public class Boss {
                     log.warn("投递失败 | 第 {} 个岗位 | 岗位：{} | 错误：{}", processedIndex + 1, jobName, e.getMessage());
                 }
 
-                // 投递间隔
-                PlaywrightUtil.sleep(DELIVERY_DELAY_SECONDS);
+                // 投递间隔：高斯随机延迟，避免固定间隔暴露自动化特征
+                pacing.betweenDeliveries();
 
                 // 处理下一个岗位
                 processedIndex++;
