@@ -29,14 +29,15 @@ public class Job51JobService implements JobPlatformService {
     private final ObjectProvider<Job51> job51Provider;
     private final ConfigService configService;
 
-    // 任务运行状态
-    private volatile boolean isRunning = false;
+    // 任务运行状态（AtomicBoolean 保证"检查-占位"原子性，防止并发启动两个投递会话）
+    private final java.util.concurrent.atomic.AtomicBoolean isRunning =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     // 停止标志
     private volatile boolean shouldStop = false;
 
     @Override
     public void executeDelivery(Consumer<JobProgressMessage> progressCallback) {
-        if (isRunning) {
+        if (!isRunning.compareAndSet(false, true)) {
             progressCallback.accept(JobProgressMessage.warning(PLATFORM, "任务已在运行中"));
             return;
         }
@@ -55,8 +56,6 @@ public class Job51JobService implements JobPlatformService {
                 return;
             }
 
-            // 通过校验后再标记运行
-            isRunning = true;
             shouldStop = false;
 
             // 暂停后台登录监控，避免与投递流程并发访问同一Page
@@ -99,7 +98,7 @@ public class Job51JobService implements JobPlatformService {
             log.error("51job投递任务执行失败", e);
             progressCallback.accept(JobProgressMessage.error(PLATFORM, "投递失败: " + e.getMessage()));
         } finally {
-            isRunning = false;
+            isRunning.set(false);
             shouldStop = false;
             // 恢复后台登录监控
             try {
@@ -110,7 +109,7 @@ public class Job51JobService implements JobPlatformService {
 
     @Override
     public void stopDelivery() {
-        if (isRunning) {
+        if (isRunning.get()) {
             log.info("收到停止51job投递任务的请求");
             shouldStop = true;
         }
@@ -120,7 +119,7 @@ public class Job51JobService implements JobPlatformService {
     public Map<String, Object> getStatus() {
         Map<String, Object> status = new HashMap<>();
         status.put("platform", PLATFORM);
-        status.put("isRunning", isRunning);
+        status.put("isRunning", isRunning.get());
         status.put("isLoggedIn", playwrightManager.isLoggedIn(PLATFORM));
         return status;
     }
@@ -132,7 +131,7 @@ public class Job51JobService implements JobPlatformService {
 
     @Override
     public boolean isRunning() {
-        return isRunning;
+        return isRunning.get();
     }
 
     /**

@@ -247,8 +247,8 @@ public class Boss {
             if (normalizedKeyword.isEmpty()) {
                 continue;
             }
-            // 检查是否需要停止
-            if (shouldStopCallback.get()) {
+            // 检查是否需要停止（与其他调用点保持一致的判空写法）
+            if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 progressCallback.accept("用户取消投递", 0, 0);
                 return;
             }

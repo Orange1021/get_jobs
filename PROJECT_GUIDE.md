@@ -40,7 +40,7 @@
 | 数据库 | SQLite | xerial jdbc 3.45.1（文件：`./db/getjobs.db`） |
 | 前端 | Next.js + React + Radix UI + Chart.js | 见 `front/package.json` |
 | 配置 | jackson-dataformat-yaml + dotenv-java | |
-| 测试 | JUnit 5 + Mockito + AssertJ（spring-boot-starter-test） | 50 个测试 |
+| 测试 | JUnit 5 + Mockito + AssertJ（spring-boot-starter-test） | 55 个测试 |
 
 ---
 
@@ -277,7 +277,7 @@ Next.js 14 + Radix UI + Chart.js：
 
 ---
 
-## 8. 测试体系（50 个单元测试，全部离线）
+## 8. 测试体系（55 个单元测试，全部离线）
 
 ```
 src/test/java/com/getjobs/
@@ -287,7 +287,8 @@ src/test/java/com/getjobs/
 │   ├── DeliveryPacingTest       2 个：投递间隔边界与随机性
 │   ├── RiskGuardTest            9 个：四条熔断规则/优先级/null安全
 │   ├── JobScoreServiceTest     13 个：薪资解析四种格式/评分规则/门控决策
-│   └── SelectorRepositoryTest   7 个：三级优先/覆盖/空白回落/YAML解析
+│   ├── SelectorRepositoryTest   7 个：三级优先/覆盖/空白回落/YAML解析
+│   └── BotPayloadTest           5 个：Bot 消息 payload JSON 转义/还原/null安全
 └── application/service/
     └── KeywordDeliveryQuotaServiceTest  8 个：SQLite 临时文件库真实跑 SQL
 ```
@@ -343,7 +344,11 @@ npm run build:prod             # 生产构建（产物复制进后端）
 - `PlaywrightUtil` 使用静态全局浏览器状态（单会话场景没问题，多会话并发需重构）
 - `DeliveryStatsController` 存在未检查的类型转换（功能正确，编译警告级别）
 - RiskGuard 探测仅 Boss 接入；51job/猎聘/智联沿用各自原有验证检查（可作为后续统一项）
-- `JobUtils` 内有调试用 `main` 方法（无害）
+- 四平台的 `clearXxxCookies()` 均调用 `context.clearCookies()`，共享上下文下会清空**所有平台**
+  的浏览器 Cookie（日志有明示，属已知设计取舍；如需按平台清理须用 Playwright 域过滤）
+- `JobUtils` 内有调试用 `main` 方法（无害）；Boss/Job51/ZhiLian 内各有个别未调用的私有方法
+  （如 Boss.resumeSubmission、Job51.collectJobIdsOnPage、ZhiLian.handleDeliveryDialog，为后续
+  改进预留，无害）
 - 真人灰度验证：首次启用 `qualityScoreThreshold` 前，建议把会话预算临时调成
   `maxDeliveries=3` 实际跑一次（这是唯一需要真实平台的验证步骤）
 

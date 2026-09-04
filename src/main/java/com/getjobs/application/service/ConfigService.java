@@ -139,13 +139,27 @@ public class ConfigService {
                 config.setUpdatedAt(LocalDateTime.now());
                 configMapper.updateById(config);
                 updateCount++;
-                log.info("更新配置: {} = {}", key, value);
+                log.info("更新配置: {} = {}", key, maskSensitive(key, value));
             } else {
                 log.warn("配置键不存在: {}", key);
             }
         }
 
         return updateCount;
+    }
+
+    /**
+     * 日志脱敏：含 KEY/TOKEN/SECRET/PASSWORD 的配置项只输出首尾各2字符，避免密钥泄露到日志。
+     */
+    private static String maskSensitive(String key, String value) {
+        if (value == null) {
+            return null;
+        }
+        String k = key == null ? "" : key.toUpperCase();
+        if (k.contains("KEY") || k.contains("TOKEN") || k.contains("SECRET") || k.contains("PASSWORD")) {
+            return value.length() <= 4 ? "****" : value.substring(0, 2) + "****" + value.substring(value.length() - 2);
+        }
+        return value;
     }
 
     /**
@@ -164,7 +178,7 @@ public class ConfigService {
             int result = configMapper.updateById(config);
 
             if (result > 0) {
-                log.info("更新配置成功: {} = {}", configKey, configValue);
+                log.info("更新配置成功: {} = {}", configKey, maskSensitive(configKey, configValue));
                 return true;
             }
         } else {

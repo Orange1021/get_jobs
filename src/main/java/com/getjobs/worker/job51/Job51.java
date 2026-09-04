@@ -17,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -424,7 +426,12 @@ public class Job51 {
                     
                     // 🚨 点击后立即检测“日投递上限”提示（短暂出现，需快速多次检测）
                     for (int i = 0; i < 10; i++) {
-                        try { Thread.sleep(200); } catch (InterruptedException ignored) {} // 每200ms检测一次
+                        try {
+                            Thread.sleep(200);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
                         if (detectDailyLimitToast51job()) {
                             reachedDailyLimit = true;
                             log.warn("点击投递按钮后，检测到 51job 日投递上限提示，停止投递");
@@ -479,7 +486,7 @@ public class Job51 {
                         java.util.regex.Matcher m2 = java.util.regex.Pattern.compile("未投递\\D*(\\d+)").matcher(dialogText);
                         if (m2.find()) failNum = Integer.parseInt(m2.group(1));
                     } catch (Exception ignored) {}
-                    if (deliveredCount > 0) {
+                    if (successNum != null && successNum > 0) {
                         deliveredCount = Math.min(successNum, selectedCount);
                     }
                     log.info("[51job] parsed dialog result: success={}, fail={}", successNum, failNum);
@@ -804,7 +811,8 @@ public class Job51 {
         StringBuilder url = new StringBuilder(BASE_URL);
         url.append(JobUtils.appendListParam("jobArea", config.getJobArea()));
         url.append(JobUtils.appendListParam("salary", config.getSalary()));
-        url.append("&keyword=").append(keyword);
+        // 关键词必须 URL 编码，避免含 & # % 空格等字符时破坏 URL 参数结构
+        url.append("&keyword=").append(URLEncoder.encode(keyword, StandardCharsets.UTF_8));
         return url.toString();
     }
 

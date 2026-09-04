@@ -3,6 +3,7 @@ package com.getjobs.worker.utils;
 import com.getjobs.application.service.ConfigService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.fluent.Request;
+import org.json.JSONObject;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -86,7 +87,7 @@ public class Bot {
         }
         try {
             String response = Request.post(hookUrl)
-                    .bodyString("{\"msgtype\": \"text\", \"text\": {\"content\": \"" + message + "\"}}",
+                    .bodyString(buildTextPayload(message),
                             org.apache.hc.core5.http.ContentType.APPLICATION_JSON)
                     .execute()
                     .returnContent()
@@ -95,6 +96,25 @@ public class Bot {
         } catch (Exception e) {
             log.error("消息推送失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 构建企业微信文本消息 JSON payload。
+     *
+     * <p>消息内容可能包含来自网页的岗位名、公司名、风控原因等文本，
+     * 其中可能出现双引号、反斜杠、换行等字符；直接字符串拼接会产生非法 JSON
+     * 导致推送失败，因此统一用 {@link JSONObject} 序列化保证转义正确。</p>
+     *
+     * @param message 消息文本（null 视为空字符串）
+     * @return 形如 {"msgtype":"text","text":{"content":"..."}} 的 JSON 字符串
+     */
+    static String buildTextPayload(String message) {
+        JSONObject text = new JSONObject();
+        text.put("content", message == null ? "" : message);
+        JSONObject body = new JSONObject();
+        body.put("msgtype", "text");
+        body.put("text", text);
+        return body.toString();
     }
 
     public static void main(String[] args) {

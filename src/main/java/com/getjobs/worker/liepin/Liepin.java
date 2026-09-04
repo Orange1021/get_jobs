@@ -271,7 +271,9 @@ public class Liepin {
     private void submit(String keyword, int todayCount) {
         // 清洗关键词：去掉前后引号与多余空白
         String cleanKeyword = keyword == null ? "" : keyword.replace("\"", "").trim();
-        page.navigate(getSearchUrl() + "&key=" + cleanKeyword);
+        // 关键词必须 URL 编码，避免含 & # % 空格等字符时破坏 URL 参数结构
+        page.navigate(getSearchUrl() + "&key="
+                + java.net.URLEncoder.encode(cleanKeyword, java.nio.charset.StandardCharsets.UTF_8));
         
         // 等待分页元素加载
         page.waitForSelector(PAGINATION_BOX, new Page.WaitForSelectorOptions().setTimeout(10000));
