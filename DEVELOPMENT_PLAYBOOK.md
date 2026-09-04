@@ -77,7 +77,7 @@
 
 | 层 | 覆盖对象 | 现状 | 成本 |
 |---|---|---|---|
-| ① 单元测试 | 纯逻辑组件（延迟/预算/评分/熔断规则/选择器解析/消息payload） | ✅ 55 个，全绿 | 毫秒级，随提交跑 |
+| ① 单元测试 | 纯逻辑组件（延迟/预算/评分/熔断规则/选择器解析） | ✅ 50 个，全绿 | 毫秒级，随提交跑 |
 | ② HTML 快照回放 | 页面选择器与交互流程 | 📋 方法已定，未建 fixtures | 打开 `file://` 本地页面，离线 |
 | ③ Mock 适配器端到端 | 完整投递会话状态流转 | 📋 参考boss-agent-cli 的 `mock_adapter.py` | 离线 |
 | ④ 真人小规模灰度 | 真实平台端到端 | 📋 待执行：预算临时调 `maxDeliveries=3` | 唯一真实平台验证 |
@@ -86,7 +86,7 @@
 `src/test/resources/fixtures/*.html`，测试中 `page.navigate("file://...")` 验证选择器，
 平台改版时"存新快照 → 跑测试 → 知道哪些坏了"。
 
-### 2.2 现有测试清单（55 个，`./gradlew test` 全绿）
+### 2.2 现有测试清单（50 个，`./gradlew test` 全绿）
 
 | 测试文件 | 数量 | 覆盖组件 |
 |---|---|---|
@@ -96,7 +96,6 @@
 | `RiskGuardTest` | 9 | 熔断：四规则/优先级/null 安全 |
 | `JobScoreServiceTest` | 13 | 评分：薪资解析四格式/规则/门控决策 |
 | `SelectorRepositoryTest` | 7 | 选择器：三级优先/覆盖/YAML 解析 |
-| `BotPayloadTest` | 5 | Bot 消息 payload：JSON 转义/还原/null 安全 |
 | `KeywordDeliveryQuotaServiceTest` | 8 | 配额统计：SQLite 临时文件库真实跑 SQL |
 
 ### 2.3 新测试编写规范
@@ -142,7 +141,7 @@
 |---|---|---|
 | 8 | **LLM 岗位匹配深度评估** | 用 LLM 对岗位 JD 与简历做语义匹配打分（参考 Auto-JobHunter 的"抓取→LLM评估→RPA投递"工作流）；注意 API 成本与本地模型（Ollama）选项 |
 | 9 | **每日定时自动投递** | Spring `@Scheduled` + 用户配置时间窗，配合 SessionBudget 天然限制单日量 |
-| 10 | **消息通知** | 熔断/预算耗尽/每日报告推送到微信（企业微信 Bot，上游有遗留代码可挖）或邮件 |
+| 10 | **消息通知** | 熔断/预算耗尽/每日报告推送到微信或邮件；原 Bot 类因零调用方已在 2026-09-04 消融中移除，实现时从 git 历史（b17b4b0）找回骨架 |
 | 11 | **选择器覆盖铺满四平台** | Boss 已接 8 键；51job/猎聘/智联的关键选择器同样接入 SelectorRepository |
 | 12 | **AI 生成打招呼语个性化** | enableAI 已有开关，结合岗位 JD 与简历生成定制 sayHi（上游 AiService 有基础） |
 

@@ -54,8 +54,6 @@ public class Job51 {
     private boolean networkHooked = false;
     private boolean reachedDailyLimit = false;
     private final java.util.Set<String> processedRequestIds = new java.util.HashSet<>();
-    @Getter
-    private int currentPageNum = 0;
     // 当前页从JSON拦截到的jobId列表
     private final java.util.List<Long> currentPageJobIds = new java.util.ArrayList<>();
 
@@ -263,7 +261,6 @@ public class Job51 {
                 }
 
                 sendProgress(String.format("正在投递第%d页", pageNum), pageNum, DEFAULT_MAX_PAGE);
-                currentPageNum = pageNum;
 
                 // 跳转到指定页码
                 if (pageNum > 1 && !jumpToPage(pageNum)) {
@@ -816,93 +813,6 @@ public class Job51 {
         return url.toString();
     }
 
-    /**
-     * 采集当前页所有岗位的 jobId（解析 jobdetail 链接/数据属性）
-     */
-    private List<Long> collectJobIdsOnPage() {
-        List<Long> ids = new ArrayList<>();
-        try {
-            // 1) 解析常见 jobdetail 链接形态
-            Locator anchors = page.locator(
-                    "a[href*='/pc/jobdetail?jobId='], " +
-                    "a[href*='/pc/jobdetail'], " +
-                    "a[href*='jobs.51job.com/'], " +
-                    "a.jname[href]"
-            );
-            int count = anchors.count();
-            for (int i = 0; i < count; i++) {
-                try {
-                    String href = anchors.nth(i).getAttribute("href");
-                    Long id = parseJobIdFromHref(href);
-                    if (id != null) ids.add(id);
-                } catch (Exception ignored) {}
-            }
-
-            // 2) 解析卡片上的数据属性（部分页面存在）
-            try {
-                Locator cards = page.locator("[data-jobid], [data-analysis-jobid], [data-job-id]");
-                int c = cards.count();
-                for (int i = 0; i < c; i++) {
-                    try {
-                        String v = null;
-                        Locator card = cards.nth(i);
-                        v = v == null ? card.getAttribute("data-jobid") : v;
-                        v = v == null ? card.getAttribute("data-analysis-jobid") : v;
-                        v = v == null ? card.getAttribute("data-job-id") : v;
-                        if (v != null) {
-                            try {
-                                Long id = Long.parseLong(v.replaceAll("[^0-9]", ""));
-                                if (id != null) ids.add(id);
-                            } catch (Exception ignored) {}
-                        }
-                    } catch (Exception ignored) {}
-                }
-            } catch (Exception ignored) {}
-
-            // 去重
-            java.util.Set<Long> uniq = new java.util.LinkedHashSet<>(ids);
-            ids = new java.util.ArrayList<>(uniq);
-
-            // 记录采集到的数量与部分样例，便于诊断
-            try {
-                if (!ids.isEmpty()) {
-                    String sample = ids.stream().limit(5).map(String::valueOf).collect(java.util.stream.Collectors.joining(", "));
-                    log.info("[51job] 当前页采集到 {} 个 jobId, 示例: {}", ids.size(), sample);
-                } else {
-                    // 采集为空：按用户约定视为达到投递上限/页面结构变化，立即通知并停止
-                    log.warn("[51job] 当前页未采集到任何 jobId，可能页面结构变化或选择器不匹配");
-                    // 向前端推送警告，便于按钮重置
-                    sendProgress("[51job] 当前页未采集到任何 jobId，可能页面结构变化或选择器不匹配", null, null);
-                    // 设置达上限标记，外层循环将终止
-                    reachedDailyLimit = true;
-                }
-            } catch (Exception ignored) {}
-        } catch (Exception e) {
-            log.debug("Failed to handle 51job success dialog: {}", e.getMessage());
-            return ids;
-        }
-        return ids;
-    }
-
-    private Long parseJobIdFromHref(String href) {
-        if (href == null || href.isEmpty()) return null;
-        try {
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]jobId=(\\d+)").matcher(href);
-            if (m.find()) {
-                return Long.parseLong(m.group(1));
-            }
-            java.util.regex.Matcher m2 = java.util.regex.Pattern.compile("/(\\d+)\\.html").matcher(href);
-            if (m2.find()) {
-                return Long.parseLong(m2.group(1));
-            }
-            // 兜底：从路径段中找较长数字片段
-            java.util.regex.Matcher m3 = java.util.regex.Pattern.compile("(\\d{5,})").matcher(href);
-            if (m3.find()) {
-                return Long.parseLong(m3.group(1));
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
 
     /**
      * 格式化时长

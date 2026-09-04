@@ -47,7 +47,6 @@ public class ZhiLian {
 
     private final List<Job> resultList = new ArrayList<>();
     private boolean isLimit = false;
-    private int maxPage = 500;
 
     private static final String HOME_URL = "https://www.zhaopin.com/sou/";
 
@@ -457,122 +456,6 @@ public class ZhiLian {
         }
     }
 
-    /**
-     * 处理投递弹窗
-     */
-    private void handleDeliveryDialog() {
-        try {
-            // 获取所有页面
-            List<Page> pages = page.context().pages();
-            if (pages.size() < 2) {
-                log.warn("未检测到投递弹窗页面");
-                return;
-            }
-
-            // 切换到最新打开的页面（投递弹窗）
-            Page dialogPage = pages.get(pages.size() - 1);
-
-            try {
-                // 检查投递结果（CSS选择器）
-                Locator deliverResult = dialogPage.locator("div.deliver-dialog");
-                if (deliverResult.count() > 0) {
-                    String text = deliverResult.textContent();
-                    if (text != null && text.contains("申请成功")) {
-                        log.info("岗位申请成功！");
-                    }
-                }
-            } catch (Exception e) {
-                log.debug("读取投递结果失败: {}", e.getMessage());
-            }
-
-            // 关闭弹窗
-            try {
-                Locator closeButton = dialogPage.locator("img[title='close-icon']");
-                if (closeButton.count() > 0) {
-                    closeButton.click();
-                    PlaywrightUtil.sleep(1);
-                }
-            } catch (Exception e) {
-                log.debug("关闭投递弹窗失败: {}", e.getMessage());
-                if (checkIsLimit()) {
-                    return;
-                }
-            }
-
-            // 投递相似职位
-            deliverSimilarJobs(dialogPage);
-
-            // 关闭弹窗页面
-            try {
-                dialogPage.close();
-            } catch (Exception e) {
-                log.debug("关闭弹窗页面失败: {}", e.getMessage());
-            }
-
-        } catch (Exception e) {
-            log.error("处理投递弹窗失败", e);
-        }
-    }
-
-    /**
-     * 投递相似职位
-     */
-    private void deliverSimilarJobs(Page dialogPage) {
-        try {
-            // 全选相似职位
-            Locator selectAllCheckbox = dialogPage.locator("div.applied-select-all input");
-            if (selectAllCheckbox.count() > 0 && !selectAllCheckbox.isChecked()) {
-                selectAllCheckbox.click();
-                PlaywrightUtil.sleep(1);
-            }
-
-            // 获取相似职位列表
-            Locator jobs = dialogPage.locator("div.recommend-job");
-            int jobCount = jobs.count();
-
-            if (jobCount == 0) {
-                log.info("没有匹配到相似职位");
-                return;
-            }
-
-            // 记录相似职位信息
-            for (int i = 0; i < jobCount; i++) {
-                try {
-                    Locator jobElement = jobs.nth(i);
-                    String jobName = safeGetText(jobElement, ".recommend-job__position");
-                    String salary = safeGetText(jobElement, "span.recommend-job__demand__salary");
-                    String years = safeGetText(jobElement, "span.recommend-job__demand__experience").replace("\n", " ");
-                    String education = safeGetText(jobElement, "span.recommend-job__demand__educational").replace("\n", " ");
-                    String companyName = safeGetText(jobElement, ".recommend-job__cname");
-                    String companyTag = safeGetText(jobElement, ".recommend-job__demand__cinfo").replace("\n", " ");
-
-                    Job job = new Job();
-                    job.setJobName(jobName);
-                    job.setSalary(salary);
-                    job.setCompanyTag(companyTag);
-                    job.setCompanyName(companyName);
-                    job.setJobInfo(years + "·" + education);
-
-                    log.info("投递【{}】公司【{}】岗位，薪资【{}】，要求【{}·{}】，规模【{}】",
-                        companyName, jobName, salary, years, education, companyTag);
-                    resultList.add(job);
-                } catch (Exception e) {
-                    log.debug("记录相似职位信息失败: {}", e.getMessage());
-                }
-            }
-
-            // 点击投递按钮
-            Locator postButton = dialogPage.locator("div.applied-select-all button");
-            if (postButton.count() > 0) {
-                postButton.click();
-                PlaywrightUtil.sleep(2);
-                log.info("相似职位投递成功！");
-            }
-
-        } catch (Exception e) {
-            log.error("投递相似职位异常: {}", e.getMessage());
-        }
-    }
 
     /**
      * 检查是否达到投递上限
@@ -595,13 +478,6 @@ public class ZhiLian {
         }
     }
 
-    /**
-     * 设置最大页数（已废弃：使用“下一页不可点击”+最多50页）
-     */
-    private void setMaxPages() {
-        // 保留方法避免旧调用报错，但不再依赖输入框改页码
-        maxPage = 50;
-    }
 
     /**
      * 构建基础搜索URL（不含关键词，由搜索框触发）

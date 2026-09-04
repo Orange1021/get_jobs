@@ -262,22 +262,6 @@ public class AiService {
     }
 
     /**
-     * 获取所有AI配置
-     */
-    @Transactional(readOnly = true)
-    public java.util.List<AiEntity> getAllAiConfigs() {
-        return aiMapper.selectList(null);
-    }
-
-    /**
-     * 根据ID获取AI配置
-     */
-    @Transactional(readOnly = true)
-    public AiEntity getAiConfigById(Long id) {
-        return aiMapper.selectById(id);
-    }
-
-    /**
      * 保存或更新AI配置（introduce/prompt）
      */
     @Transactional
@@ -302,19 +286,6 @@ public class AiService {
         }
 
         return aiEntity;
-    }
-
-    /**
-     * 删除AI配置
-     */
-    @Transactional
-    public boolean deleteAiConfig(Long id) {
-        int result = aiMapper.deleteById(id);
-        if (result > 0) {
-            log.info("删除AI配置成功，ID: {}", id);
-            return true;
-        }
-        return false;
     }
 
     /**

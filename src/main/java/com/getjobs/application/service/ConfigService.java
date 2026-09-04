@@ -51,14 +51,6 @@ public class ConfigService {
     }
 
     /**
-     * 获取所有配置
-     * @return 配置列表
-     */
-    public List<ConfigEntity> getAllConfigs() {
-        return configMapper.selectList(null);
-    }
-
-    /**
      * 根据配置键获取配置
      * @param configKey 配置键
      * @return 配置实体
@@ -67,17 +59,6 @@ public class ConfigService {
         LambdaQueryWrapper<ConfigEntity> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ConfigEntity::getConfigKey, configKey);
         return configMapper.selectOne(queryWrapper);
-    }
-
-    /**
-     * 根据分类获取配置列表
-     * @param category 分类
-     * @return 配置列表
-     */
-    public List<ConfigEntity> getConfigsByCategory(String category) {
-        LambdaQueryWrapper<ConfigEntity> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ConfigEntity::getCategory, category);
-        return configMapper.selectList(queryWrapper);
     }
 
     /**
@@ -183,26 +164,6 @@ public class ConfigService {
             }
         } else {
             log.warn("配置键不存在: {}", configKey);
-        }
-
-        return false;
-    }
-
-    /**
-     * 创建新配置
-     * @param config 配置实体
-     * @return 是否创建成功
-     */
-    @Transactional
-    public boolean createConfig(ConfigEntity config) {
-        config.setCreatedAt(LocalDateTime.now());
-        config.setUpdatedAt(LocalDateTime.now());
-
-        int result = configMapper.insert(config);
-
-        if (result > 0) {
-            log.info("创建配置成功: {} = {}", config.getConfigKey(), config.getConfigValue());
-            return true;
         }
 
         return false;

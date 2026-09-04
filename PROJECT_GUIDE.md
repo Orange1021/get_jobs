@@ -40,7 +40,7 @@
 | 数据库 | SQLite | xerial jdbc 3.45.1（文件：`./db/getjobs.db`） |
 | 前端 | Next.js + React + Radix UI + Chart.js | 见 `front/package.json` |
 | 配置 | jackson-dataformat-yaml + dotenv-java | |
-| 测试 | JUnit 5 + Mockito + AssertJ（spring-boot-starter-test） | 55 个测试 |
+| 测试 | JUnit 5 + Mockito + AssertJ（spring-boot-starter-test） | 50 个测试 |
 
 ---
 
@@ -109,8 +109,8 @@ get_jobs-1.0.0/
 │           ├── RiskGuard.java        # 风控熔断
 │           ├── JobScoreService.java  # 岗位质量评分
 │           ├── SelectorRepository.java # 选择器外部覆盖
-│           ├── PlaywrightUtil.java   # Playwright 静态工具（sleep等）
-│           ├── Bot.java / Job.java / Platform.java / JobUtils.java
+│           ├── PlaywrightUtil.java   # 线程等待工具（sleep/sleepMillis，消融后仅存这两个方法）
+│           ├── Job.java / JobUtils.java   # 岗位模型 / URL 参数拼接
 │           └── StealthScriptManager.java  # 隐身脚本注入
 ├── src/test/java/...           # 50 个单元测试（见 §8）
 └── front/                      # Next.js 前端（见 §7）
@@ -142,8 +142,7 @@ Boss.execute()                                    ← 每次会话入口
                  └─ ② DeliveryPacing.betweenDeliveries() 高斯延迟 5~25s
 ```
 
-- **黑名单**：存 SQLite（`bossService.getBlackCompanies/Recruiters/Jobs`），
-  另有 `updateBlacklistFromChats()` 自动从聊天记录识别拒信并拉黑。
+- **黑名单**：存 SQLite（`bossService.getBlackCompanies/Recruiters/Jobs`）。
 - **调试模式**：`config.getDebugger() == true` 时只遍历不投递。
 
 ### 5.2 四平台投递模式差异
@@ -277,7 +276,7 @@ Next.js 14 + Radix UI + Chart.js：
 
 ---
 
-## 8. 测试体系（55 个单元测试，全部离线）
+## 8. 测试体系（50 个单元测试，全部离线）
 
 ```
 src/test/java/com/getjobs/
@@ -287,8 +286,7 @@ src/test/java/com/getjobs/
 │   ├── DeliveryPacingTest       2 个：投递间隔边界与随机性
 │   ├── RiskGuardTest            9 个：四条熔断规则/优先级/null安全
 │   ├── JobScoreServiceTest     13 个：薪资解析四种格式/评分规则/门控决策
-│   ├── SelectorRepositoryTest   7 个：三级优先/覆盖/空白回落/YAML解析
-│   └── BotPayloadTest           5 个：Bot 消息 payload JSON 转义/还原/null安全
+│   └── SelectorRepositoryTest   7 个：三级优先/覆盖/空白回落/YAML解析
 └── application/service/
     └── KeywordDeliveryQuotaServiceTest  8 个：SQLite 临时文件库真实跑 SQL
 ```
@@ -341,19 +339,37 @@ npm run build:prod             # 生产构建（产物复制进后端）
 
 ### 10.3 已知遗留事项（低优先级）
 
-- `PlaywrightUtil` 使用静态全局浏览器状态（单会话场景没问题，多会话并发需重构）
-- `DeliveryStatsController` 存在未检查的类型转换（功能正确，编译警告级别）
 - RiskGuard 探测仅 Boss 接入；51job/猎聘/智联沿用各自原有验证检查（可作为后续统一项）
 - 四平台的 `clearXxxCookies()` 均调用 `context.clearCookies()`，共享上下文下会清空**所有平台**
   的浏览器 Cookie（日志有明示，属已知设计取舍；如需按平台清理须用 Playwright 域过滤）
-- `JobUtils` 内有调试用 `main` 方法（无害）；Boss/Job51/ZhiLian 内各有个别未调用的私有方法
-  （如 Boss.resumeSubmission、Job51.collectJobIdsOnPage、ZhiLian.handleDeliveryDialog，为后续
-  改进预留，无害）
+- ZhiLian 的 `resultList` 仅在已删除的"相似职位投递"路径中填充，`execute()` 返回值恒为 0
+  （智联实际投递计数走 keyword_daily_quota 表，不影响配额与统计）
 - 真人灰度验证：首次启用 `qualityScoreThreshold` 前，建议把会话预算临时调成
   `maxDeliveries=3` 实际跑一次（这是唯一需要真实平台的验证步骤）
 
-### 10.4 开发纪律（2026-09-03 起约定）
+### 10.4 消融记录（2026-09-04，奥卡姆剃刀裁剪）
 
+经调用图逐项核查（src 内引用 + 前端端点核对 + 部署手册核对），以下"零调用方"模块已移除，
+50 个测试全绿，行为无变化：
+
+- **整类/整文件**：`PlaywrightController`（调试遗留，无文档无前端）、`Bot` + `BotPayloadTest`
+  （消息推送全链路无调用方，做 P3#10 消息通知时从 git 历史找回）、`Platform` 枚举、
+  上游 README 图片×4、`xpathHelper.crx`、`.github/workflows/auto-merge.yaml`（上游许愿墙 CI）、
+  `scripts/fix_job51_compile_blockers.ps1`（一次性历史脚本）
+- **Boss**：1415→610 行。删除 30 个死方法（resumeSubmission/processJobDetailJsonAndInsert/
+  attachJobDetailResponseListener/updateBlacklistFromChats/isSalaryNotExpected 薪资链等）、
+  `aiService` 依赖与 `encryptIdToUserId` 字段
+- **Locators(boss)**：31→5 个常量；**PlaywrightUtil**：619→44 行（仅 sleep/sleepMillis）；
+  **Job51** 988→898 行；**ZhiLian** 730→606 行；**JobUtils** 删 formatDuration×2/
+  getRandomNumberInRange/main
+- **服务层**：ConfigService ×3、AiService ×3、CookieService ×2、PlaywrightManager ×2 死方法
+- **控制器**：BossController 与 JobController 的投递进度 SSE 全套（/api/boss/stream、
+  /api/51job/stream、emitters、心跳）——前端只订阅 /api/jobs/login-status/stream，
+  从不连接这两个进度流；投递进度改为日志输出
+- **保留依据**：`DeliveryStatsController` 被 AI_SETUP_GUIDE 部署验证步骤引用；
+  `_upstream_get_jobs/`（本地情报快照，未入库）；`REQUIREMENTS.md`（活文档）
+
+### 10.5 开发纪律（2026-09-03 起约定）
 1. **每次改进必须经过测试**，测试不过不提交
 2. **组件必须可离线测试**（注入随机源/时钟/睡眠函数/探测接口）
 3. 防封参数只允许在 `DeliveryPacing`/常量处集中调整，禁止散落魔数

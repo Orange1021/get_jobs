@@ -8,7 +8,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * Cookie服务类
@@ -73,24 +72,5 @@ public class CookieService {
                 .set("remark", remark)
                 .set("updated_at", LocalDateTime.now());
         return cookieMapper.update(null, updateWrapper) > 0;
-    }
-
-    /**
-     * 删除指定平台的Cookie
-     * @param platform 平台名称
-     * @return 是否成功
-     */
-    public boolean deleteCookie(String platform) {
-        LambdaQueryWrapper<CookieEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(CookieEntity::getPlatform, platform);
-        return cookieMapper.delete(wrapper) > 0;
-    }
-
-    /**
-     * 获取所有Cookie
-     * @return Cookie列表
-     */
-    public List<CookieEntity> getAllCookies() {
-        return cookieMapper.selectList(null);
     }
 }

@@ -101,7 +101,7 @@ public class PlaywrightManager {
      * 初始化Playwright实例（延迟初始化）
      */
     public void init() {
-        if (isInitialized()) {
+        if (playwright != null && browser != null && bossPage != null) {
             return;
         }
         log.info("========================================");
@@ -1486,20 +1486,6 @@ public class PlaywrightManager {
         } catch (Exception e) {
             log.error("关闭Playwright管理器时发生错误", e);
         }
-    }
-
-    /**
-     * 检查Playwright是否已初始化
-     */
-    public boolean isInitialized() {
-        return playwright != null && browser != null && bossPage != null;
-    }
-
-    /**
-     * 获取CDP端口号
-     */
-    public int getCdpPort() {
-        return CDP_PORT;
     }
 
     /**

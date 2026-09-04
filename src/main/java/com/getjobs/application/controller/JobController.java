@@ -48,42 +48,9 @@ public class JobController {
     private final CookieService cookieService;
 
     // SSE emitter lists
-    private final List<SseEmitter> job51ProgressEmitters = new CopyOnWriteArrayList<>();
     private final List<SseEmitter> loginStatusEmitters = new CopyOnWriteArrayList<>();
 
-    // ==================== 51job 投递进度 SSE ====================
-
-    /** SSE - 51job投递任务进度推送 */
-    @GetMapping(value = "/51job/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamJob51Progress() {
-        SseEmitter emitter = new SseEmitter(0L); // 0 = 永不超时
-        job51ProgressEmitters.add(emitter);
-
-        emitter.onCompletion(() -> {
-            log.info("51job进度SSE连接已完成");
-            job51ProgressEmitters.remove(emitter);
-        });
-
-        emitter.onTimeout(() -> {
-            log.info("51job进度SSE连接超时");
-            job51ProgressEmitters.remove(emitter);
-        });
-
-        emitter.onError(e -> {
-            log.error("51job进度SSE连接错误", e);
-            job51ProgressEmitters.remove(emitter);
-        });
-
-        try {
-            emitter.send(SseEmitter.event()
-                    .name("connected")
-                    .data(Map.of("message", "已连接到51job投递进度推送")));
-        } catch (IOException e) {
-            log.error("发送SSE连接消息失败", e);
-        }
-
-        return emitter;
-    }
+    // ==================== 登录状态 SSE ====================
 
     /** SSE - 登录状态变化推送 */
     @GetMapping(value = "/jobs/login-status/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -130,28 +97,6 @@ public class JobController {
         return emitter;
     }
 
-    private void sendJob51Progress(JobProgressMessage message) {
-        List<SseEmitter> deadEmitters = new CopyOnWriteArrayList<>();
-        for (SseEmitter emitter : job51ProgressEmitters) {
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("progress")
-                        .data(objectMapper.writeValueAsString(message)));
-            } catch (Exception e) {
-                if (e instanceof AsyncRequestNotUsableException ||
-                        e instanceof ClientAbortException ||
-                        (e.getCause() instanceof ClientAbortException) ||
-                        (e instanceof IOException && String.valueOf(e.getMessage()).contains("中止了一个已建立的连接"))) {
-                    log.debug("51job进度 SSE 客户端已断开，移除连接: {}", e.getMessage());
-                    try { emitter.complete(); } catch (Exception ignored) {}
-                } else {
-                    log.error("发送51job进度消息失败", e);
-                }
-                deadEmitters.add(emitter);
-            }
-        }
-        job51ProgressEmitters.removeAll(deadEmitters);
-    }
 
     private void sendLoginStatusChange(PlaywrightManager.LoginStatusChange change) {
         List<SseEmitter> deadEmitters = new CopyOnWriteArrayList<>();
@@ -204,29 +149,6 @@ public class JobController {
         loginStatusEmitters.removeAll(deadEmitters);
     }
 
-    /** 心跳 - Boss进度 SSE */
-    @Scheduled(fixedRate = 30000)
-    public void heartbeatJob51Progress() {
-        if (job51ProgressEmitters.isEmpty()) return;
-        List<SseEmitter> deadEmitters = new CopyOnWriteArrayList<>();
-        for (SseEmitter emitter : job51ProgressEmitters) {
-            try {
-                emitter.send(SseEmitter.event().name("ping").data("keep-alive"));
-            } catch (Exception e) {
-                if (e instanceof AsyncRequestNotUsableException ||
-                        e instanceof ClientAbortException ||
-                        (e.getCause() instanceof ClientAbortException) ||
-                        (e instanceof IOException && String.valueOf(e.getMessage()).contains("中止了一个已建立的连接"))) {
-                    log.debug("51job进度 SSE 客户端已断开（心跳），移除连接: {}", e.getMessage());
-                    try { emitter.complete(); } catch (Exception ignored) {}
-                } else {
-                    log.error("发送51job进度心跳失败", e);
-                }
-                deadEmitters.add(emitter);
-            }
-        }
-        job51ProgressEmitters.removeAll(deadEmitters);
-    }
 
     // ==================== 51job 配置 / 登录 / Cookie / 任务 ====================
 
@@ -396,11 +318,8 @@ public class JobController {
                 response.put("status", "running");
                 return ResponseEntity.badRequest().body(response);
             }
-            CompletableFuture.runAsync(() -> job51JobService.executeDelivery(pm -> {
-                // 推送到 SSE 并保留日志输出
-                sendJob51Progress(pm);
-                log.info("[{}] {}", pm.getPlatform(), pm.getMessage());
-            }));
+            CompletableFuture.runAsync(() -> job51JobService.executeDelivery(pm ->
+                    log.info("[{}] {}", pm.getPlatform(), pm.getMessage())));
             response.put("success", true);
             response.put("message", "51job任务启动成功");
             response.put("status", "started");
